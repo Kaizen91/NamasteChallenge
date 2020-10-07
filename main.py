@@ -45,7 +45,7 @@ def insert_values_to_table(conn,table_name, df):
 
         df.columns = get_column_names_from_db_table(c, table_name)
 
-        df.to_sql(name=table_name, con=conn, if_exists='append', index=False)
+        df.to_sql(name=table_name, con=conn, if_exists='replace', index=False)
 
         print('SQL insert process finished')
     else:
@@ -118,15 +118,19 @@ def main():
 
     #create two dataframes joined on orderdate
     df_q1 = pd.json_normalize(q1_orders)
+    df_q1['order_date'] = df_q1['created_at'].apply(lambda x: x[:10])
+
     df_fx = pd.DataFrame(fx)
     df_fx['cad_rates'] = df_fx['rates'].apply(lambda x: x['CAD'])
-    df_q1['order_date'] = df_q1['created_at'].apply(lambda x: x[:10])
-    df_join_q1_fx = pd.merge(left=df_q1,right=df_fx,left_on='order_date',right_index=True)
+    df_fx_cad = df_fx['cad_rates']
+
+    
+    df_join_q1_fx = pd.merge(left=df_q1,right=df_fx_cad,left_on='order_date',right_index=True,how='left')
+    df_join_q1_fx['cad_rates'].fillna(df_join_q1_fx['cad_rates'].mean(),inplace =True)
     df_join_q1_fx['total_price_cad'] = round((df_join_q1_fx['total_price'] * df_join_q1_fx['cad_rates']),2)
     df_join_q1_fx.reset_index(inplace=True)
 
     #create the dataframes corresponding the sql tables orders, orderlines, products, and customers
-
     df_orders = df_join_q1_fx[['id','customer.id','total_price','total_price_cad','order_date']]
 
     df_order_lines_s1 = json_normalize(q1_orders, record_path='line_items',
@@ -138,7 +142,7 @@ def main():
 
     df_products = df_order_lines_s2[['line_product_id','line_product_sku','line_product_name']].drop_duplicates()
 
-    df_customers = df_join_q1_fx[['customer.id','customer.name','customer.email']].drop_duplicates()
+    df_customers = df_q1[['customer.id','customer.name','customer.email']].drop_duplicates()
 
     # create a database connection
     conn = create_connection(database)
@@ -154,7 +158,7 @@ def main():
 
     #insert to tables
     print("TEST")
-    print(df_products)
+    print(df_join_q1_fx)
     insert_values_to_table(conn, 'orders', df_orders)
     insert_values_to_table(conn, 'customers', df_customers)
     insert_values_to_table(conn, 'order_lines', df_order_lines_final)
