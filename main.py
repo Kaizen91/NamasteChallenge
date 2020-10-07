@@ -52,6 +52,7 @@ def insert_values_to_table(conn,table_name, df):
         print('Connection to database failed')
 
 
+
 def get_column_names_from_db_table(sql_cursor, table_name):
     """
     Scrape the column names from a database table to a list
@@ -68,7 +69,7 @@ def get_column_names_from_db_table(sql_cursor, table_name):
 
     for name in table_column_names:
         column_names.append(name[1])
-
+        
     return column_names
 
 
@@ -76,36 +77,53 @@ def get_column_names_from_db_table(sql_cursor, table_name):
 def main():
     database = r"sales_reporting_sqlite.db"
 
-    sql_create_customers_table = """ CREATE TABLE IF NOT EXISTS customers (
+    sql_create_customers_table = """ CREATE TABLE IF NOT EXISTS dim_customers (
                                         id integer,
                                         name text NOT NULL,
-                                        email text
+                                        email text,
+                                    FOREIGN KEY (id) REFERENCES sales_fact (customer_id)
+
                                     ); """
 
-    sql_create_orders_table = """CREATE TABLE IF NOT EXISTS orders (
+
+    sql_create_orders_table = """CREATE TABLE IF NOT EXISTS dim_orders (
                                     id integer,
                                     customer_id integer NOT NULL,
                                     total_price_usd numeric(10,2),
                                     total_price_cad numeric(10,2),
                                     order_date text NOT NULL,
-                                    FOREIGN KEY (customer_id) REFERENCES customers (id)
+                                    FOREIGN KEY (id) REFERENCES sales_fact (order_id)
                                 );"""
     
-    sql_create_order_lines_table = """CREATE TABLE IF NOT EXISTS order_lines (
+    sql_create_order_lines_table = """CREATE TABLE IF NOT EXISTS dim_order_lines (
                                 id integer,
                                 order_id integer NOT NULL,
                                 product_id integer NOT NULL,
                                 price_usd numeric(10,2),
                                 price_cad numeric(10,2),
-                                FOREIGN KEY (order_id) REFERENCES orders (id),
-                                FOREIGN KEY (product_id) REFERENCES products (id)
+                                FOREIGN KEY (id) REFERENCES sales_fact (line_id)
                             );"""
 
-    sql_create_products_table = """CREATE TABLE IF NOT EXISTS products (
+    sql_create_products_table = """CREATE TABLE IF NOT EXISTS dim_products (
                                 id integer,
                                 product_sku text NOT NULL,
-                                product_name text NOT NULL
+                                product_name text NOT NULL,
+                                FOREIGN KEY (id) REFERENCES sale_fact (product_id)
                             );"""
+
+    sql_create_sales_fact_table = """CREATE TABLE IF NOT EXISTS sales_fact (
+                                order_id integer,
+                                customer_id integer,
+                                line_id integer,
+                                product_id integer,
+                                price_usd numeric(10,2),
+                                price_cad numeric(10,2),
+                                FOREIGN KEY (order_id) REFERENCES orders (id),
+                                FOREIGN KEY (order_id) REFERENCES orders (id),
+                                FOREIGN KEY (order_id) REFERENCES orders (id),
+                                FOREIGN KEY (order_id) REFERENCES orders (id)
+                            );"""
+    
     #get json data
     f = open('orders.json')
     q1_orders = json.load(f)
@@ -116,7 +134,7 @@ def main():
     response.raise_for_status()
     fx = json.loads(response.text)
 
-    #create two dataframes joined on orderdate
+    #associate exchange rates with orders
     df_q1 = pd.json_normalize(q1_orders)
     df_q1['order_date'] = df_q1['created_at'].apply(lambda x: x[:10])
 
@@ -130,7 +148,7 @@ def main():
     df_join_q1_fx['total_price_cad'] = round((df_join_q1_fx['total_price'] * df_join_q1_fx['cad_rates']),2)
     df_join_q1_fx.reset_index(inplace=True)
 
-    #create the dataframes corresponding the sql tables orders, orderlines, products, and customers
+    #dim tables
     df_orders = df_join_q1_fx[['id','customer.id','total_price','total_price_cad','order_date']]
 
     df_order_lines_s1 = json_normalize(q1_orders, record_path='line_items',
@@ -144,6 +162,12 @@ def main():
 
     df_customers = df_q1[['customer.id','customer.name','customer.email']].drop_duplicates()
 
+    #fact table
+    df_order_cust = df_join_q1_fx[['id','customer.id']]
+    df_order_line_prod = df_order_lines_final[['id','line_id','line_product_id','line_price','line_price_cad']]
+    df_sales_fact = pd.merge(left=df_order_cust,right=df_order_line_prod,on='id')
+    
+
     # create a database connection
     conn = create_connection(database)
 
@@ -153,16 +177,26 @@ def main():
         create_table(conn, sql_create_orders_table)
         create_table(conn, sql_create_order_lines_table)
         create_table(conn, sql_create_products_table)
+        create_table(conn, sql_create_sales_fact_table)
     else:
         print("Error! cannot create the database connection.")
 
     #insert to tables
-    print("TEST")
-    print(df_join_q1_fx)
-    insert_values_to_table(conn, 'orders', df_orders)
-    insert_values_to_table(conn, 'customers', df_customers)
-    insert_values_to_table(conn, 'order_lines', df_order_lines_final)
-    insert_values_to_table(conn, 'products', df_products)
+    insert_values_to_table(conn, 'dim_orders', df_orders)
+    insert_values_to_table(conn, 'dim_customers', df_customers)
+    insert_values_to_table(conn, 'dim_order_lines', df_order_lines_final)
+    insert_values_to_table(conn, 'dim_products', df_products)
+    insert_values_to_table(conn, 'sales_fact', df_sales_fact)
+
+
+    df_orders.to_csv('./output/orders.csv',index=False)
+    df_customers.to_csv('./output/customers.csv',index=False)
+    df_order_lines_final.to_csv('./output/order_lines.csv',index=False)
+    df_products.to_csv('./output/products.csv',index=False)
+    df_sales_fact.to_csv('./output/sales_fact.csv',index=False)
+
+    conn.commit()
+    conn.close()
 
 if __name__ == '__main__':
     main()
