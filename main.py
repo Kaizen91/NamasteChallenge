@@ -69,7 +69,7 @@ def get_column_names_from_db_table(sql_cursor, table_name):
 
     for name in table_column_names:
         column_names.append(name[1])
-        
+
     return column_names
 
 
@@ -99,8 +99,8 @@ def main():
                                 id integer,
                                 order_id integer NOT NULL,
                                 product_id integer NOT NULL,
-                                price_usd numeric(10,2),
-                                price_cad numeric(10,2),
+                                value_usd numeric(10,2),
+                                value_cad numeric(10,2),
                                 FOREIGN KEY (id) REFERENCES sales_fact (line_id)
                             );"""
 
@@ -116,8 +116,8 @@ def main():
                                 customer_id integer,
                                 line_id integer,
                                 product_id integer,
-                                price_usd numeric(10,2),
-                                price_cad numeric(10,2),
+                                value_usd numeric(10,2),
+                                value_cad numeric(10,2),
                                 FOREIGN KEY (order_id) REFERENCES orders (id),
                                 FOREIGN KEY (order_id) REFERENCES orders (id),
                                 FOREIGN KEY (order_id) REFERENCES orders (id),
